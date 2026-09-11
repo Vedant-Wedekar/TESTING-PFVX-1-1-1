@@ -1,0 +1,56 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Rooms are world-readable by ID (the room ID itself is the "key" —
+    // there is no account system, so possession of the ID + password is
+    // the access model). Anyone can create a room. Only the passwordHash
+    // field is protected from being overwritten once set, so a room
+    // can't be hijacked by someone rewriting its password after creation.
+    match /rooms/{roomId} {
+      allow read: if true;
+      allow create: if isValidRoomCreate(request.resource.data);
+      allow update: if isValidRoomTouch(request.resource.data, resource.data);
+      allow delete: if true;
+
+      // Messages live in a subcollection so they can be listed/streamed
+      // per-room without exposing other rooms' content.
+      match /messages/{messageId} {
+        allow read: if true;
+        allow create: if isValidMessageCreate(request.resource.data);
+        allow update: if isValidPinToggle(request.resource.data, resource.data);
+        allow delete: if true;
+      }
+    }
+  }
+
+  function isValidRoomCreate(data) {
+    return data.keys().hasAll(['roomId', 'createdAt']) &&
+      data.roomId is string &&
+      data.roomId.size() <= 32 &&
+      (data.passwordHash == null || (data.passwordHash is string && data.passwordHash.size() == 64));
+  }
+
+  function isValidRoomTouch(newData, oldData) {
+    // Only lastActivity may change on an existing room; password and id
+    // are immutable after creation.
+    return newData.passwordHash == oldData.passwordHash &&
+      newData.roomId == oldData.roomId;
+  }
+
+  function isValidMessageCreate(data) {
+    return data.type in ['text', 'image'] &&
+      data.createdAt != null &&
+      (
+        (data.type == 'text' && data.content is string && data.content.size() <= 20000) ||
+        (data.type == 'image' && data.imageURL is string && data.storagePath is string)
+      );
+  }
+
+  function isValidPinToggle(newData, oldData) {
+    // Clients may only flip the `pinned` flag — everything else about a
+    // message is immutable once written.
+    return newData.diff(oldData).affectedKeys().hasOnly(['pinned']);
+  }
+}

@@ -1,0 +1,23 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Images live under room-images/{roomId}/{filename}. Access mirrors
+    // Firestore's model: the room ID is the access key, there is no
+    // per-file auth. Uploads are capped at 20MB and restricted to a
+    // handful of image mime types; downloads are public read since the
+    // corresponding Firestore doc is public read too.
+    match /room-images/{roomId}/{fileName} {
+      allow read: if true;
+      allow write: if request.resource.size < 20 * 1024 * 1024 &&
+        request.resource.contentType.matches('image/(png|jpeg|webp|gif)');
+      allow delete: if true;
+    }
+
+    // Deny everything else by default.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
